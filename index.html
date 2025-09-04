@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>AR MART Fun Billing App</title>
+<style>
+  body {
+    font-family: 'Arial', sans-serif;
+    margin: 0;
+    background: linear-gradient(135deg, #fffae6, #ffe6f0);
+  }
+  h2 { text-align: center; color: #222; margin-top: 15px; }
+  .container {
+    max-width: 720px;
+    margin: 20px auto;
+    background: #fff;
+    padding: 20px;
+    border-radius: 15px;
+    box-shadow: 0px 8px 15px rgba(0,0,0,0.3);
+  }
+  input, select, button {
+    padding: 10px;
+    margin: 6px 0;
+    width: 100%;
+    border-radius: 10px;
+    border: 1px solid #ccc;
+    font-size: 16px;
+  }
+  button {
+    background: linear-gradient(to right, #ff7e5f, #feb47b);
+    color: #fff;
+    border: none;
+    cursor: pointer;
+    font-weight: bold;
+    transition: 0.3s;
+  }
+  button:hover { transform: scale(1.05); }
+  table { width: 100%; border-collapse: collapse; margin-top: 15px; }
+  th, td { padding: 8px; border: 1px solid #ccc; text-align: center; }
+  tr.added { animation: slideIn 0.5s ease forwards; }
+  @keyframes slideIn {
+    0% { opacity:0; transform: translateX(-50px);}
+    100% { opacity:1; transform: translateX(0);}
+  }
+  .total { font-size: 18px; font-weight: bold; text-align: right; margin-top: 10px; color:#333;}
+  .history { margin-top: 20px; background: #eef; padding: 10px; border-radius: 10px; max-height: 200px; overflow-y: auto; }
+  .token-pop { position: fixed; top: 20px; right: 20px; background: #ffeb3b; padding: 15px 25px; border-radius: 15px; font-weight:bold; font-size:18px; box-shadow: 0 0 10px #333; display:none; }
+</style>
+</head>
+<body>
+
+<div class="token-pop" id="tokenPop">🎫 New Token!</div>
+
+<div class="container">
+  <h2>🛒 AR MART Billing System</h2>
+
+  <!-- Customer Info -->
+  <label>Customer Name:</label>
+  <input type="text" id="customerName" placeholder="Enter customer name">
+
+  <label>Customer Number:</label>
+  <input type="tel" id="customerNumber" placeholder="Enter customer mobile number">
+
+  <!-- Product Input -->
+  <label>Product Name:</label>
+  <input type="text" id="productName" placeholder="e.g. Burger">
+
+  <label>Price:</label>
+  <input type="number" id="productPrice" placeholder="e.g. 50">
+
+  <label>Quantity:</label>
+  <input type="number" id="productQty" value="1">
+
+  <button onclick="addProduct()">➕ Add Product</button>
+
+  <!-- Product Table -->
+  <table id="productTable">
+    <tr>
+      <th>Product</th>
+      <th>Price</th>
+      <th>Qty</th>
+      <th>Subtotal</th>
+      <th>Action</th>
+    </tr>
+  </table>
+
+  <!-- Total Section -->
+  <div class="total">💰 Grand Total: ₹<span id="grandTotal">0</span></div>
+
+  <!-- Payment -->
+  <label>Payment Method:</label>
+  <select id="paymentMethod">
+    <option value="Cash">Cash</option>
+    <option value="UPI">UPI</option>
+  </select>
+
+  <label>Cash Given (if Cash):</label>
+  <input type="number" id="cashGiven" placeholder="Enter amount given">
+
+  <div class="total">💸 Change: ₹<span id="change">0</span></div>
+
+  <!-- Buttons -->
+  <button onclick="sendSMS()">📩 Send SMS Bill</button>
+  <button onclick="printBill()">🖨️ Print Bill</button>
+
+  <!-- Bill History -->
+  <div class="history">
+    <h3>📜 Customer Bill History</h3>
+    <ul id="billHistory"></ul>
+  </div>
+</div>
+
+<!-- Sound effect -->
+<audio id="cashSound">
+  <source src="https://actions.google.com/sounds/v1/cash/cash_register.ogg" type="audio/ogg">
+</audio>
+
+<script>
+let token = parseInt(localStorage.getItem('token')) || 1;
+let products = [];
+let bills = JSON.parse(localStorage.getItem('bills')) || [];
+
+const defaultProducts = [
+  { name: "Burger", price: 50, qty: 1 },
+  { name: "Pizza", price: 100, qty: 1 },
+  { name: "Coke", price: 20, qty: 1 },
+  { name: "Fries", price: 30, qty: 1 },
+  { name: "Sandwich", price: 60, qty: 1 }
+];
+
+const loyaltyMessages = [
+  "🎁 Next time get 5% off!",
+  "⭐ You earned 10 loyalty points!",
+  "🥤 Show this SMS for a free drink!",
+  "💝 Surprise! Come again for a gift!",
+  "🎉 You are a VIP customer! Enjoy special discount next time!"
+];
+
+// Load default products at start
+defaultProducts.forEach(p => {
+  const subtotal = p.price * p.qty;
+  products.push({ name: p.name, price: p.price, qty: p.qty, subtotal });
+});
+renderTable();
+calculateTotal();
+
+function addProduct() {
+  const name = document.getElementById('productName').value;
+  const price = parseFloat(document.getElementById('productPrice').value);
+  const qty = parseInt(document.getElementById('productQty').value);
+  if (!name || !price || !qty) { alert("Please enter all product details"); return; }
+  const subtotal = price * qty;
+  products.push({ name, price, qty, subtotal });
+  renderTable();
+  calculateTotal();
+  const rows = document.getElementById('productTable').rows;
+  rows[rows.length-1].classList.add('added');
+  document.getElementById('productName').value = "";
+  document.getElementById('productPrice').value = "";
+  document.getElementById('productQty').value = 1;
+}
+
+function removeProduct(index) {
+  products.splice(index, 1);
+  renderTable();
+  calculateTotal();
+}
+
+function renderTable() {
+  const table = document.getElementById('productTable');
+  table.innerHTML = `<tr>
+      <th>Product</th>
+      <th>Price</th>
+      <th>Qty</th>
+      <th>Subtotal</th>
+      <th>Action</th>
+    </tr>`;
+  products.forEach((p,i)=>{
+    table.innerHTML += `<tr>
+      <td>${p.name}</td>
+      <td>₹${p.price}</td>
+      <td>${p.qty}</td>
+      <td>₹${p.subtotal}</td>
+      <td><button onclick="removeProduct(${i})">❌</button></td>
+    </tr>`;
+  });
+}
+
+function calculateTotal() {
+  let total = products.reduce((sum,p)=>sum+p.subtotal,0);
+  document.getElementById('grandTotal').innerText = total;
+  const cashGiven = parseFloat(document.getElementById('cashGiven').value)||0;
+  let change = cashGiven - total;
+  document.getElementById('change').innerText = change>=0 ? change:0;
+}
+
+document.getElementById('cashGiven').addEventListener('input', calculateTotal);
+
+function renderHistory() {
+  const history = document.getElementById('billHistory');
+  history.innerHTML = "";
+
+  const customerNumber = document.getElementById('customerNumber').value;
+
+  let filteredBills = bills;
+  if(customerNumber) {
+    filteredBills = bills.filter(b => b.customerNumber === customerNumber);
+  }
+
+  filteredBills.slice().reverse().forEach(b=>{
+    let li = document.createElement('li');
+    li.textContent = `🎫 Token ${b.token} | ${b.customerName||"N/A"} | ₹${b.total} | ${b.date} ${b.time}`;
+    history.appendChild(li);
+  });
+}
+
+document.getElementById('customerNumber').addEventListener('input', renderHistory);
+
+function sendSMS() {
+  const customerName=document.getElementById('customerName').value;
+  const customerNumber=document.getElementById('customerNumber').value;
+  const total=document.getElementById('grandTotal').innerText;
+  const paymentMethod=document.getElementById('paymentMethod').value;
+  const cashGiven=document.getElementById('cashGiven').value;
+  const change=document.getElementById('change').innerText;
+  if(!customerNumber){alert("Enter customer number!");return;}
+  if(products.length===0){alert("Add products first!");return;}
+  const dateObj=new Date();
+  const date=dateObj.toLocaleDateString();
+  const time=dateObj.toLocaleTimeString();
+
+  const tokenPop=document.getElementById('tokenPop');
+  tokenPop.innerText=`🎫 Token ${token} Created!`;
+  tokenPop.style.display='block';
+  setTimeout(()=>{tokenPop.style.display='none';},2000);
+
+  document.getElementById('cashSound').play();
+
+  const randomMessage=loyaltyMessages[Math.floor(Math.random()*loyaltyMessages.length)];
+
+  let sms=`🏪 AR MART
+📅 Date: ${date} | 🕒 Time: ${time}
+🎫 Token: ${token}
+
+👤 Customer: ${customerName||"N/A"}
+🛒 Products:\n`;
+  products.forEach(p=>{
+    sms+=`🍴 ${p.name} (${p.qty} x ${p.price}) = ${p.subtotal}\n`;
+  });
+  sms+=`---------------------
+💰 Grand Total: ₹${total}
+💳 Payment: ${paymentMethod}\n`;
+  if(paymentMethod==="Cash"){
+    sms+=`💵 Cash Given: ₹${cashGiven}
+💸 Change: ₹${change}\n`;
+  }
+  sms+=`\n${randomMessage}\n🙏 Thank you for shopping! We loved serving you! 😊`;
+
+  bills.push({token,customerName,customerNumber,total,date,time});
+  localStorage.setItem('bills',JSON.stringify(bills));
+  localStorage.setItem('token',token+1);
+
+  renderHistory();
+
+  products=[];
+  // reload default products after sending SMS
+  defaultProducts.forEach(p => {
+    const subtotal = p.price * p.qty;
+    products.push({ name: p.name, price: p.price, qty: p.qty, subtotal });
+  });
+  renderTable();
+  calculateTotal();
+
+  document.getElementById('customerName').value="";
+  document.getElementById('customerNumber').value="";
+  document.getElementById('cashGiven').value="";
+
+  window.location.href=`sms:${customerNumber}?body=${encodeURIComponent(sms)}`;
+
+  token++;
+}
+
+// Print Bill Function
+function printBill() {
+  if(products.length === 0) {
+    alert("Add products first to print!");
+    return;
+  }
+
+  const customerName = document.getElementById('customerName').value || "N/A";
+  const dateObj = new Date();
+  const date = dateObj.toLocaleDateString();
+  const time = dateObj.toLocaleTimeString();
+  const tokenNumber = token;
+  const paymentMethod = document.getElementById('paymentMethod').value;
+  const cashGiven = document.getElementById('cashGiven').value || 0;
+  const change = document.getElementById('change').innerText;
+
+  const randomMessage = loyaltyMessages[Math.floor(Math.random() * loyaltyMessages.length)];
+
+  let billContent = `
+    <h2 style="text-align:center;">🏪 AR MART</h2>
+    <p>Date: ${date} | Time: ${time} | Token: ${tokenNumber}</p>
+    <p>Customer: ${customerName}</p>
+    <table border="1" style="width:100%; border-collapse:collapse;">
+      <tr><th>Product</th><th>Price</th><th>Qty</th><th>Subtotal</th></tr>`;
+
+  products.forEach(p => {
+    billContent += `<tr>
+      <td>${p.name}</td>
+      <td>₹${p.price}</td>
+      <td>${p.qty}</td>
+      <td>₹${p.subtotal}</td>
+    </tr>`;
+  });
+
+  const total = document.getElementById('grandTotal').innerText;
+
+  billContent += `</table>
+    <p>💰 Grand Total: ₹${total}</p>
+    <p>💳 Payment: ${paymentMethod}</p>`;
+
+  if(paymentMethod === "Cash") {
+    billContent += `<p>💵 Cash Given: ₹${cashGiven}</p>
+    <p>💸 Change: ₹${change}</p>`;
+  }
+
+  billContent += `<p>${randomMessage}</p>
+    <p>🙏 Thank you for shopping! We loved serving you! 😊</p>`;
+
+  const printWindow = window.open('', '', 'height=600,width=400');
+  printWindow.document.write('<html><head><title>Print Bill</title></head><body>');
+  printWindow.document.write(billContent);
+  printWindow.document.write('</body></html>');
+  printWindow.document.close();
+  printWindow.print();
+}
+
+renderHistory();
+</script>
+</body>
+</html>
